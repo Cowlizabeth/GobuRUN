@@ -16,16 +16,27 @@ jobs:
       image: barichello/godot-ci:4.4.1
 
     steps:
-      - name: Checkout game
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Import assets
-        run: godot --headless --path . --editor --import --quit
+      - name: Extract game archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p game build
+          unzip -q GoblinRunner-Fixed-Android.zip -d game
+          test -f game/project.godot
+          test -f game/main.tscn
+          test -f game/export_presets.cfg
+
+      - name: Import Godot assets
+        run: godot --headless --path game --editor --import --quit
 
       - name: Export debug APK
         run: |
-          mkdir -p build
-          godot --headless --path . --export-debug "Android" build/GoblinRunner-debug.apk
+          godot --headless --path game \
+            --export-debug "Android" \
+            "$GITHUB_WORKSPACE/build/GoblinRunner-debug.apk"
           test -s build/GoblinRunner-debug.apk
 
       - name: Upload APK
@@ -33,5 +44,5 @@ jobs:
         with:
           name: GoblinRunner-Android
           path: build/GoblinRunner-debug.apk
-          retention-days: 14
+          if-no-files-found: error
           
