@@ -1,0 +1,37 @@
+
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.4.1
+
+    steps:
+      - name: Checkout game
+        uses: actions/checkout@v4
+
+      - name: Import assets
+        run: godot --headless --path . --editor --import --quit
+
+      - name: Export debug APK
+        run: |
+          mkdir -p build
+          godot --headless --path . --export-debug "Android" build/GoblinRunner-debug.apk
+          test -s build/GoblinRunner-debug.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: GoblinRunner-Android
+          path: build/GoblinRunner-debug.apk
+          retention-days: 14
+          
