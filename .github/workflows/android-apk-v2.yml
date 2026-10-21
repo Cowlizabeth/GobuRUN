@@ -18,79 +18,80 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Unpack game
-        shell: bash
         run: |
-          set -euo pipefail
+          set -e
           mkdir -p game build
           unzip -q -o GoblinRunner-Fixed-Android.zip -d game
           test -f game/project.godot
           test -f game/main.tscn
           test -f game/export_presets.cfg
 
-      - name: Set up Java 17
+      - name: Install Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Install Android SDK
-        shell: bash
         run: |
-          set -euo pipefail
+          set -e
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
             "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+            "platforms;android-34" \
+            "build-tools;34.0.0"
 
-      - name: Install Godot
-        shell: bash
+      - name: Install Godot 4.4.1
         run: |
-          set -euo pipefail
-          BASE="https://github.com/godotengine/godot/releases/download/4.4.1-stable"
+          set -e
+          BASE=https://github.com/godotengine/godot/releases/download/4.4.1-stable
 
-          curl -fL --retry 3 \
-            -o /tmp/godot.zip \
+          curl -fL --retry 3 -o /tmp/godot.zip \
             "$BASE/Godot_v4.4.1-stable_linux.x86_64.zip"
 
           sudo unzip -q /tmp/godot.zip -d /usr/local/bin
           sudo mv /usr/local/bin/Godot_v4.4.1-stable_linux.x86_64 /usr/local/bin/godot
           sudo chmod +x /usr/local/bin/godot
 
-          curl -fL --retry 3 \
-            -o /tmp/templates.tpz \
+          curl -fL --retry 3 -o /tmp/templates.tpz \
             "$BASE/Godot_v4.4.1-stable_export_templates.tpz"
 
-          mkdir -p /tmp/godot-templates
+          mkdir -p /tmp/templates
           mkdir -p "$HOME/.local/share/godot/export_templates/4.4.1.stable"
 
           unzip -q /tmp/templates.tpz \
             "templates/android_debug.apk" \
             "templates/android_release.apk" \
             "templates/version.txt" \
-            -d /tmp/godot-templates
+            -d /tmp/templates
 
-          cp /tmp/godot-templates/templates/* \
+          cp /tmp/templates/templates/* \
             "$HOME/.local/share/godot/export_templates/4.4.1.stable/"
 
           godot --version
 
-      - name: Configure Android export
-        shell: bash
+      - name: Configure Godot SDK paths
         run: |
-          set -euo pipefail
-
+          set -e
           mkdir -p "$HOME/.config/godot"
+          SETTINGS="$HOME/.config/godot/editor_settings-4.4.tres"
+
+          printf '[gd_resource type="EditorSettings" format=3]\n\n[resource]\n' > "$SETTINGS"
+
+          printf 'export/android/android_sdk_path = "%s"\n' \
+            "$ANDROID_HOME" >> "$SETTINGS"
+
+          printf 'export/android/java_sdk_path = "%s"\n' \
+            "$JAVA_HOME" >> "$SETTINGS"
+
+          cat "$SETTINGS"
+          test -f "$ANDROID_HOME/platform-tools/adb"
+          test -f "$JAVA_HOME/bin/java"
+
+      - name: Create debug keystore
+        run: |
+          set -e
           mkdir -p "$HOME/.android"
-
-          cat > "$HOME/.config/godot/editor_settings-4.tres" <<SETTINGS
-          [gd_resource type="EditorSettings" format=3]
-
-          [resource]
-          export/android/android_sdk_path = "$ANDROID_HOME"
-          export/android/java_sdk_path = "$JAVA_HOME"
-          SETTINGS
 
           keytool -genkeypair \
             -keystore "$HOME/.android/debug.keystore" \
@@ -102,37 +103,18 @@ jobs:
             -validity 10000 \
             -dname "CN=Android Debug,O=Android,C=US"
 
-      - name: Fix export preset
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          sed -i \
-            "s|^keystore/debug=\"\"|keystore/debug=\"$HOME/.android/debug.keystore\"|" \
-            game/export_presets.cfg
-
-          sed -i \
-            's|^keystore/debug_user=""|keystore/debug_user="androiddebugkey"|' \
-            game/export_presets.cfg
-
-          sed -i \
-            's|^keystore/debug_password=""|keystore/debug_password="android"|' \
-            game/export_presets.cfg
-
-          echo "Export preset configured"
-          test -f "$HOME/.android/debug.keystore"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PATH=$HOME/.android/debug.keystore" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_USER=androiddebugkey" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=android" >> "$GITHUB_ENV"
 
       - name: Import assets
-        shell: bash
         run: |
           godot --headless --path game \
             --editor --import --quit
 
       - name: Build APK
-        shell: bash
         run: |
-          set -euo pipefail
-
+          set -e
           godot --headless --verbose \
             --path game \
             --export-debug "Android" \
