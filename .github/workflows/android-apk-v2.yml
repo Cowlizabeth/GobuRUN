@@ -1,95 +1,34 @@
 
-name: Build Android APK
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-jobs:
-  android:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Unpack game
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p game build
-          unzip -q -o GoblinRunner-Fixed-Android.zip -d game
-          test -f game/project.godot
-          test -f game/main.tscn
-          test -f game/export_presets.cfg
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Install Android SDK components
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "ANDROID_SDK_ROOT=${ANDROID_HOME}" >> "$GITHUB_ENV"
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
-
-      - name: Install Godot 4.4.1 and export templates
-        shell: bash
-        run: |
-          set -euo pipefail
-          base=https://github.com/godotengine/godot/releases/download/4.4.1-stable
-          curl -fL --retry 3 -o /tmp/godot.zip "$base/Godot_v4.4.1-stable_linux.x86_64.zip"
-          sudo unzip -q /tmp/godot.zip -d /usr/local/bin
-          sudo mv /usr/local/bin/Godot_v4.4.1-stable_linux.x86_64 /usr/local/bin/godot
-          sudo chmod +x /usr/local/bin/godot
-          curl -fL --retry 3 -o /tmp/export_templates.tpz "$base/Godot_v4.4.1-stable_export_templates.tpz"
-          mkdir -p /tmp/godot-templates "$HOME/.local/share/godot/export_templates/4.4.1.stable"
-          unzip -q /tmp/export_templates.tpz 'templates/android_debug.apk' 'templates/android_release.apk' 'templates/version.txt' -d /tmp/godot-templates
-          cp /tmp/godot-templates/templates/* "$HOME/.local/share/godot/export_templates/4.4.1.stable/"
-          godot --version
-
-      - name: Configure Godot Android exporter and debug signing
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.config/godot" "$HOME/.android"
-          cat > "$HOME/.config/godot/editor_settings-4.tres" <<SETTINGS
-          [gd_resource type="EditorSettings" format=3]
-
-          [resource]
-          export/android/android_sdk_path = "$ANDROID_HOME"
-          export/android/java_sdk_path = "$JAVA_HOME"
-          SETTINGS
-          keytool -genkeypair -v \
-            -keystore "$HOME/.android/debug.keystore" \
-            -alias androiddebugkey -storepass android -keypass android \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
-          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PATH=$HOME/.android/debug.keystore" >> "$GITHUB_ENV"
-          echo 'GODOT_ANDROID_KEYSTORE_DEBUG_USER=androiddebugkey' >> "$GITHUB_ENV"
-          echo 'GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=android' >> "$GITHUB_ENV"
-
-      - name: Import assets
-        run: godot --headless --path game --editor --import --quit
-
       - name: Export Android APK
         shell: bash
         run: |
           set -euo pipefail
-          godot --headless --path game --export-debug Android "$GITHUB_WORKSPACE/build/GoblinRunner-debug.apk"
-          test -s build/GoblinRunner-debug.apk
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: GoblinRunner-Android
-          path: build/GoblinRunner-debug.apk
-          if-no-files-found: error
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+
+          p = Path("game/export_presets.cfg")
+          s = p.read_text()
+
+          settings = {
+              "keystore/debug": os.path.expanduser("~/.android/debug.keystore"),
+              "keystore/debug_user": "androiddebugkey",
+              "keystore/debug_password": "android",
+          }
+
+          for key, value in settings.items():
+              import re
+              pattern = r'(?m)^' + re.escape(key) + r'=.*$'
+              s = re.sub(pattern, key + '="' + value + '"', s)
+
+          p.write_text(s)
+          PY
+
+          mkdir -p build
+          godot --headless --verbose --path game \
+            --export-debug "Android" \
+            "$GITHUB_WORKSPACE/build/GoblinRunner-debug.apk"
+
+          test -s build/GoblinRunner-debug.apk
+          
